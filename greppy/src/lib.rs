@@ -11,12 +11,15 @@ pub struct Config {
 
 
 impl Config {
-    pub fn new(args: &[String]) -> Result<Config, &'static str>{
-        if args.len() < 3 {
-            return Err("not enough args");
+    pub fn new(args: std::env::Args) -> Result<Config, &'static str>{
+        let query = match args.next(){
+            Some(value) => value,
+            _ => return Err("failed to parse args");
         }
-        let query = args[1].clone();
-        let filename = args[2].clone();
+        let filename = match args.next(){
+            Some(value) = value,
+            _ => return Err("failed to parse args")
+        }
 
         let case_sensitive = env::var("CASE_INSENSITIVE").is_err();
 
