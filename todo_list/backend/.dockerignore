@@ -10,7 +10,6 @@ Dockerfile*
 
 # Build artifacts
 target/
-Cargo.lock
 
 # IDE
 .vscode/
