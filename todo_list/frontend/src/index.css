@@ -1,0 +1,18 @@
+html {
+  font-size: clamp(16px, 1.1vw, 19px);
+} 
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.card {
+  font-size: clamp(16px, 1.1vw, 18px);
+  line-height: 1.5;
+}

@@ -1,0 +1,57 @@
+services:
+  # База данных PostgreSQL
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      - POSTGRES_DB=todo_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - todo-network
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend (Rust + Actix-Web)
+  backend:
+    build:
+      context: ./backend
+      target: final
+    restart: always
+    environment:
+      - ADDRESS=0.0.0.0:8080
+      - PG_HOST=db
+      - PG_DBNAME=todo_db
+      - PG_USER=postgres
+      - PG_PASSWORD=postgres
+      - RUST_LOG=debug
+    networks:
+      - todo-network
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Frontend (React + Vite + Nginx)
+  frontend:
+    build:
+      context: ./frontend
+      target: final
+    restart: always
+    ports:
+      - "3000:80"
+    networks:
+      - todo-network
+    depends_on:
+      - backend
+
+volumes:
+  db-data:
+
+networks:
+  todo-network:
+    driver: bridge
