@@ -1,0 +1,38 @@
+services:
+  server:
+    build:
+      context: .
+      target: final
+    ports:
+      - 8080:8080
+    environment:
+      - ADDRESS=0.0.0.0:8080
+      - PG_HOST=db
+      - PG_DBNAME=todo_db
+      - PG_USER=postgres
+      - PG_PASSWORD=postgres
+      - RUST_LOG=debug
+    depends_on:
+      db:
+        condition: service_healthy
+  
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      - POSTGRES_DB=todo_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    expose:
+      - 5432
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  db-data:
+

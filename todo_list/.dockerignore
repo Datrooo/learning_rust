@@ -1,0 +1,36 @@
+# Git
+.git
+.gitignore
+
+# Docker files
+.dockerignore
+docker-compose*.yml
+compose.yaml
+Dockerfile*
+
+# Build artifacts
+target/
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+
+# Tests
+test_api.sh
+
+# Documentation (опционально)
+README*.md
+
+# OS
+.DS_Store
+Thumbs.db

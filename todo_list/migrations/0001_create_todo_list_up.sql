@@ -1,0 +1,6 @@
+CREATE TABLE todo (
+  id SERIAL PRIMARY KEY,
+  task TEXT NOT NULL,
+  is_finished BOOLEAN NOT NULL
+);
+
