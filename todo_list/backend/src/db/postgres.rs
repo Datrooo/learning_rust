@@ -3,12 +3,13 @@ use tokio_postgres::NoTls;
 use tokio_postgres_migration::Migration;
 
 const SCRIPTS_UP: [(&str, &str); 1] = [(
-    "0001_create_todo_list", include_str!("../migrations/0001_create_todo_list_up.sql"),
+    "0001_create_todo_list",
+    include_str!("../../migrations/0001_create_todo_list_up.sql"),
 )];
 
 fn create_config() -> Config {
     let mut cfg = Config::new();
-    if let Ok(host) =  std::env::var("PG_HOST"){
+    if let Ok(host) = std::env::var("PG_HOST") {
         cfg.host = Some(host);
     }
     if let Ok(dbname) = std::env::var("PG_DBNAME") {
@@ -24,12 +25,19 @@ fn create_config() -> Config {
 }
 
 pub fn create_pool() -> Pool {
-    create_config().create_pool(NoTls).expect("failed to create a pool")
+    create_config()
+        .create_pool(NoTls)
+        .expect("failed to create a pool")
 }
 
-pub async  fn migrate_up(pool: &Pool) {
-    let mut client = pool.get().await.expect("failed to get a postgres client");
+pub async fn migrate_up(pool: &Pool) {
+    let mut client = pool
+        .get()
+        .await
+        .expect("failed to get a postgres client");
     let migration = Migration::new("migrations".to_string());
-    migration.up(&mut **client, &SCRIPTS_UP).await.expect("failed to run migration")
-
+    migration
+        .up(&mut **client, &SCRIPTS_UP)
+        .await
+        .expect("failed to run migration")
 }
