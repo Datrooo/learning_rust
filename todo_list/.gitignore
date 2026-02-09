@@ -1,0 +1,14 @@
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+target
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
