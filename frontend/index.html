@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Upload Service</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f0f23;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .container {
+            background: #1a1a2e;
+            border-radius: 16px;
+            padding: 40px;
+            width: 500px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 8px;
+            font-size: 24px;
+            color: #fff;
+        }
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 32px;
+            font-size: 14px;
+        }
+        .upload-area {
+            border: 2px dashed #333;
+            border-radius: 12px;
+            padding: 40px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-bottom: 20px;
+        }
+        .upload-area:hover, .upload-area.dragover {
+            border-color: #6c5ce7;
+            background: rgba(108, 92, 231, 0.05);
+        }
+        .upload-area .icon { font-size: 48px; margin-bottom: 12px; }
+        .upload-area p { color: #888; font-size: 14px; }
+        .upload-area .filename {
+            color: #6c5ce7;
+            font-weight: 600;
+            margin-top: 8px;
+        }
+        input[type="file"] { display: none; }
+        .btn {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: #6c5ce7;
+            color: white;
+        }
+        .btn:hover { background: #5a4bd1; }
+        .btn:disabled {
+            background: #333;
+            color: #666;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 24px;
+            padding: 20px;
+            border-radius: 10px;
+            display: none;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .result.success {
+            display: block;
+            background: rgba(0, 184, 148, 0.1);
+            border: 1px solid #00b894;
+            color: #00b894;
+        }
+        .result.error {
+            display: block;
+            background: rgba(255, 71, 87, 0.1);
+            border: 1px solid #ff4757;
+            color: #ff4757;
+        }
+        .result .detail { color: #ccc; }
+        .result .label { color: #888; font-size: 12px; text-transform: uppercase; }
+        .spinner {
+            display: none;
+            text-align: center;
+            margin-top: 16px;
+            color: #6c5ce7;
+        }
+        .formats {
+            text-align: center;
+            color: #555;
+            font-size: 12px;
+            margin-top: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎵 Audio Upload</h1>
+        <p class="subtitle">Загрузите аудиофайл для валидации</p>
+
+        <div class="upload-area" id="dropZone">
+            <div class="icon">📁</div>
+            <p>Перетащите файл сюда или нажмите для выбора</p>
+            <div class="filename" id="fileName"></div>
+        </div>
+
+        <input type="file" id="fileInput" accept="audio/*,.mp3,.wav,.ogg,.flac,.aac,.wma,.m4a">
+
+        <button class="btn" id="uploadBtn" disabled>Загрузить и проверить</button>
+
+        <div class="formats">Поддерживаемые форматы: MP3, WAV, OGG, FLAC, AAC, M4A</div>
+
+        <div class="spinner" id="spinner">⏳ Проверяем файл...</div>
+
+        <div class="result" id="result"></div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const fileName = document.getElementById('fileName');
+        const resultDiv = document.getElementById('result');
+        const spinner = document.getElementById('spinner');
+
+        let selectedFile = null;
+
+        // Определяем URL бэкенда
+        const BACKEND_URL = window.location.hostname === 'localhost'
+            ? 'http://localhost:8080'
+            : `http://${window.location.hostname}:8080`;
+
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) {
+                selectFile(e.dataTransfer.files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length > 0) {
+                selectFile(fileInput.files[0]);
+            }
+        });
+
+        function selectFile(file) {
+            selectedFile = file;
+            fileName.textContent = `${file.name} (${formatSize(file.size)})`;
+            uploadBtn.disabled = false;
+            resultDiv.className = 'result';
+            resultDiv.style.display = 'none';
+        }
+
+        function formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        function formatDuration(secs) {
+            const m = Math.floor(secs / 60);
+            const s = Math.floor(secs % 60);
+            return m > 0 ? `${m} мин ${s} сек` : `${s.toFixed(1)} сек`;
+        }
+
+        uploadBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+
+            uploadBtn.disabled = true;
+            spinner.style.display = 'block';
+            resultDiv.style.display = 'none';
+
+            const formData = new FormData();
+            formData.append('audio', selectedFile);
+
+            try {
+                const response = await fetch(`${BACKEND_URL}/upload`, {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    resultDiv.className = 'result success';
+                    resultDiv.style.display = 'block';
+                    resultDiv.innerHTML = `
+                        <strong>✅ ${data.message}</strong><br><br>
+                        <span class="label">Файл</span><br>
+                        <span class="detail">${data.filename}</span><br><br>
+                        <span class="label">Формат / Кодек</span><br>
+                        <span class="detail">${data.format || '—'} / ${data.codec || '—'}</span><br><br>
+                        <span class="label">Длительность</span><br>
+                        <span class="detail">${data.duration_secs ? formatDuration(data.duration_secs) : '—'}</span><br><br>
+                        <span class="label">Sample Rate</span><br>
+                        <span class="detail">${data.sample_rate ? data.sample_rate + ' Hz' : '—'}</span><br><br>
+                        <span class="label">Каналы</span><br>
+                        <span class="detail">${data.channels || '—'}</span><br><br>
+                        <span class="label">Битрейт</span><br>
+                        <span class="detail">${data.bit_rate ? Math.round(data.bit_rate / 1000) + ' kbps' : '—'}</span><br><br>
+                        <span class="label">Размер</span><br>
+                        <span class="detail">${formatSize(data.size_bytes)}</span>
+                    `;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.style.display = 'block';
+                    resultDiv.innerHTML = `<strong>❌ Ошибка валидации</strong><br><br>${data.error}`;
+                }
+            } catch (err) {
+                resultDiv.className = 'result error';
+                resultDiv.style.display = 'block';
+                resultDiv.innerHTML = `<strong>❌ Ошибка сети</strong><br><br>${err.message}`;
+            } finally {
+                spinner.style.display = 'none';
+                uploadBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>
