@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Audio Upload Service</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -107,6 +108,31 @@
             font-size: 12px;
             margin-top: 12px;
         }
+        .player-section {
+            margin-top: 20px;
+            display: none;
+        }
+        .player-section.visible {
+            display: block;
+        }
+        .player-section .label {
+            color: #888;
+            font-size: 12px;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+        .player-section audio {
+            width: 100%;
+            margin-top: 8px;
+            border-radius: 8px;
+        }
+        .hls-path {
+            color: #6c5ce7;
+            font-family: monospace;
+            font-size: 12px;
+            word-break: break-all;
+            margin-top: 6px;
+        }
     </style>
 </head>
 <body>
@@ -120,7 +146,8 @@
             <div class="filename" id="fileName"></div>
         </div>
 
-        <input type="file" id="fileInput" accept="audio/*,.mp3,.wav,.ogg,.flac,.aac,.wma,.m4a">
+        <!-- <input type="file" id="fileInput" accept="audio/*,.mp3,.wav,.ogg,.flac,.aac,.wma,.m4a"> -->
+        <input type="file" id="fileInput">
 
         <button class="btn" id="uploadBtn" disabled>Загрузить и проверить</button>
 
@@ -129,6 +156,12 @@
         <div class="spinner" id="spinner">⏳ Проверяем файл...</div>
 
         <div class="result" id="result"></div>
+
+        <div class="player-section" id="playerSection">
+            <span class="label">🎧 HLS Стриминг</span>
+            <audio id="hlsAudio" controls></audio>
+            <div class="hls-path" id="hlsPathDisplay"></div>
+        </div>
     </div>
 
     <script>
@@ -138,8 +171,12 @@
         const fileName = document.getElementById('fileName');
         const resultDiv = document.getElementById('result');
         const spinner = document.getElementById('spinner');
+        const playerSection = document.getElementById('playerSection');
+        const hlsAudio = document.getElementById('hlsAudio');
+        const hlsPathDisplay = document.getElementById('hlsPathDisplay');
 
         let selectedFile = null;
+        let hlsInstance = null;
 
         // Определяем URL бэкенда
         const BACKEND_URL = window.location.hostname === 'localhost'
@@ -202,7 +239,7 @@
             formData.append('audio', selectedFile);
 
             try {
-                const response = await fetch(`${BACKEND_URL}/upload`, {
+                const response = await fetch(`${BACKEND_URL}/api/media/upload`, {
                     method: 'POST',
                     body: formData,
                 });
@@ -229,20 +266,67 @@
                         <span class="label">Размер</span><br>
                         <span class="detail">${formatSize(data.size_bytes)}</span>
                     `;
+
+                    // ─── HLS Player ─────────────────────────────────────
+                    if (data.hls_path) {
+                        initHlsPlayer(data.hls_path);
+                    } else {
+                        playerSection.classList.remove('visible');
+                    }
                 } else {
                     resultDiv.className = 'result error';
                     resultDiv.style.display = 'block';
                     resultDiv.innerHTML = `<strong>❌ Ошибка валидации</strong><br><br>${data.error}`;
+                    playerSection.classList.remove('visible');
                 }
             } catch (err) {
                 resultDiv.className = 'result error';
                 resultDiv.style.display = 'block';
                 resultDiv.innerHTML = `<strong>❌ Ошибка сети</strong><br><br>${err.message}`;
+                playerSection.classList.remove('visible');
             } finally {
                 spinner.style.display = 'none';
                 uploadBtn.disabled = false;
             }
         });
+
+        function initHlsPlayer(hlsPath) {
+            // hls_path приходит как "audio-hls/stem/uuid/playlist.m3u8"
+            // backend route: GET /hls/{*path} — нужно убрать префикс бакета "audio-hls/"
+            const objectKey = hlsPath.replace(/^audio-hls\//, '');
+            const streamUrl = `${BACKEND_URL}/hls/${objectKey}`;
+
+            hlsPathDisplay.textContent = `📂 ${hlsPath}`;
+
+            // Уничтожить предыдущий инстанс если есть
+            if (hlsInstance) {
+                hlsInstance.destroy();
+                hlsInstance = null;
+            }
+
+            if (Hls.isSupported()) {
+                hlsInstance = new Hls();
+                hlsInstance.loadSource(streamUrl);
+                hlsInstance.attachMedia(hlsAudio);
+                hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+                    console.log('HLS manifest loaded, ready to play');
+                });
+                hlsInstance.on(Hls.Events.ERROR, (event, data) => {
+                    console.error('HLS error:', data);
+                    if (data.fatal) {
+                        hlsPathDisplay.textContent += ' ❌ HLS playback error';
+                    }
+                });
+            } else if (hlsAudio.canPlayType('application/vnd.apple.mpegurl')) {
+                // Safari native HLS
+                hlsAudio.src = streamUrl;
+            } else {
+                hlsPathDisplay.textContent += ' ❌ Браузер не поддерживает HLS';
+                return;
+            }
+
+            playerSection.classList.add('visible');
+        }
     </script>
 </body>
 </html>

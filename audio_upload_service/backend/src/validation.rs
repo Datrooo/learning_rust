@@ -62,7 +62,6 @@ pub fn validate_extension(filename: &str) -> Result<String, String> {
     }
 }
 
-
 pub fn validate_magic_bytes(data: &[u8]) -> Result<&'static str, String> {
     if data.len() < 12 {
         return Err("Файл слишком мал для определения формата".to_string());
@@ -117,15 +116,17 @@ pub fn check_extension_magic_compatibility(extension: &str, detected: &str) -> R
     Ok(())
 }
 
-
 pub fn run_ffprobe(file_path: &Path) -> Result<ValidationResult, String> {
     let output = Command::new("ffprobe")
         .args([
-            "-v", "quiet",
-            "-print_format", "json",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
             "-show_format",
             "-show_streams",
-            "-select_streams", "a:0",
+            "-select_streams",
+            "a:0",
         ])
         .arg(file_path)
         .output()
@@ -230,7 +231,6 @@ pub fn run_ffprobe(file_path: &Path) -> Result<ValidationResult, String> {
         bit_rate,
     })
 }
-
 
 pub fn run_ffmpeg_decode_check(file_path: &Path) -> Result<(), String> {
     let output = Command::new("ffmpeg")

@@ -4,8 +4,8 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock* ./
 # Создаём пустой src для кеширования зависимостей
 RUN mkdir src && echo "fn main() {}" > src/main.rs
-RUN cargo build --release 2>/dev/null || true
-# Копируем реальный код и собираем
+RUN cargo build --release 
+# Копируем код и собираем
 COPY src ./src
 RUN touch src/main.rs && cargo build --release
 
