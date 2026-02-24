@@ -4,35 +4,34 @@ use std::path::Path;
 
 use crate::hls::HlsOutput;
 
+
+pub struct UploadProgress {
+    pub bytes_received: usize,
+    pub total_expected: Option<usize>,  // из Content-Length
+    pub stage: Stage,                    // Receiving, Validating, Converting, Uploading, Done, Error
+}
+
+pub enum Stage {
+    Receiving,
+    Validating,
+    Converting,
+    Uploading,
+    Done,
+    Error,
+}
+
 #[async_trait]
 pub trait StorageBackend: Send + Sync {
     fn name(&self) -> &str;
 
     async fn ensure_bucket(&self, bucket: &str) -> Result<()>;
 
-    async fn upload_file(
-        &self,
-        local_path: &Path,
-        bucket: &str,
-        object_key: &str,
-    ) -> Result<()>;
+    async fn upload_file(&self, local_path: &Path, bucket: &str, object_key: &str) -> Result<()>;
 
-    async fn get_object(
-        &self,
-        bucket: &str,
-        object_key: &str,
-    ) -> Result<Vec<u8>>;
+    async fn get_object(&self, bucket: &str, object_key: &str) -> Result<Vec<u8>>;
 
-    async fn upload_hls_output(
-        &self,
-        hls: &HlsOutput,
-        bucket: &str,
-        prefix: &str,
-    ) -> Result<()> {
-        let files = hls
-            .list_files()
-            .await
-            .map_err(|e| anyhow::anyhow!(e))?;
+    async fn upload_hls_output(&self, hls: &HlsOutput, bucket: &str, prefix: &str) -> Result<()> {
+        let files = hls.list_files().await.map_err(|e| anyhow::anyhow!(e))?;
 
         tracing::info!(
             "[{}] Uploading {} HLS files to {}/{}",
@@ -66,4 +65,6 @@ pub trait StorageBackend: Send + Sync {
 
         Ok(())
     }
+
+    async fn delete_object(&self, bucket: &str, object_key: &str) -> Result<()>;
 }

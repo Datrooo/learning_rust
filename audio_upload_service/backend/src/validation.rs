@@ -99,10 +99,13 @@ pub fn validate_magic_bytes(data: &[u8]) -> Result<&'static str, String> {
     Err("Не удалось определить формат по заголовку файла. Файл не является аудио.".to_string())
 }
 
+// как-то захордкожено выглядит
 pub fn check_extension_magic_compatibility(extension: &str, detected: &str) -> Result<(), String> {
     let compatible = match (extension, detected) {
         (a, b) if a == b => true,
         ("opus", "ogg") => true,
+        ("aac", "m4a") => true,
+        ("m4a", "aac") => true,
         _ => false,
     };
 

@@ -19,3 +19,4 @@ aws-sdk-s3 = "1.124.0"
 aws-config = "1.8.14"
 utoipa = { version = "4", features = ["axum_extras", "uuid", "chrono"] }
 utoipa-swagger-ui = { version = "7", features = ["axum"] }
+tempfile = "3"

@@ -188,6 +188,21 @@ impl RustFsClient {
         );
         Ok(())
     }
+
+    pub async fn delete_object(&self, bucket: &str, object_key: &str) -> Result<()> {
+        self.client
+            .delete_object()
+            .bucket(bucket)
+            .key(object_key)
+            .send()
+            .await
+            .with_context(|| {
+                format!("error deleting object '{object_key}' from bucket '{bucket}'")
+            })?;
+
+        info!("deleted object '{object_key}' from bucket '{bucket}'");
+        Ok(())
+    }
 }
 
 pub async fn create_client(cfg: &Config) -> Result<RustFsClient> {
@@ -213,7 +228,6 @@ pub async fn create_client(cfg: &Config) -> Result<RustFsClient> {
     Ok(RustFsClient::new(Client::from_conf(s3_config)))
 }
 
-
 use crate::storage::StorageBackend;
 use async_trait::async_trait;
 
@@ -227,20 +241,16 @@ impl StorageBackend for RustFsClient {
         self.new_bucket(bucket).await
     }
 
-    async fn upload_file(
-        &self,
-        local_path: &Path,
-        bucket: &str,
-        object_key: &str,
-    ) -> Result<()> {
+    async fn upload_file(&self, local_path: &Path, bucket: &str, object_key: &str) -> Result<()> {
         RustFsClient::upload_file(self, local_path, object_key, bucket).await
     }
 
-    async fn get_object(
-        &self,
-        bucket: &str,
-        object_key: &str,
-    ) -> Result<Vec<u8>> {
+    async fn get_object(&self, bucket: &str, object_key: &str) -> Result<Vec<u8>> {
         self.get_bytes(bucket, object_key).await
+    }
+
+    async fn delete_object(&self, bucket: &str, object_key: &str) -> Result<()> {
+        RustFsClient::delete_object(self, bucket, object_key).await?;
+        Ok(())
     }
 }

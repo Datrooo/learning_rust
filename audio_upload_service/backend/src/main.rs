@@ -5,7 +5,11 @@ mod stream;
 mod upload;
 mod validation;
 
-use axum::{extract::DefaultBodyLimit, routing::{get, post}, Router};
+use axum::{
+    extract::DefaultBodyLimit,
+    routing::{get, post},
+    Router,
+};
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{info, warn};
@@ -14,17 +18,15 @@ use utoipa_swagger_ui::SwaggerUi;
 
 struct ApiDoc;
 
-
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    
+
     info!("Using RustFS storage backend");
-            let cfg = loader_rustfs::Config::from_env()
-                .expect("RustFS config: set RUSTFS_* env variables");
-            let client = loader_rustfs::create_client(&cfg)
-                .await
-                .expect("Failed to create RustFS client");
+    let cfg = loader_rustfs::Config::from_env().expect("RustFS config: set RUSTFS_* env variables");
+    let client = loader_rustfs::create_client(&cfg)
+        .await
+        .expect("Failed to create RustFS client");
     let storage = Arc::new(client);
 
     // в будущем сделать ограничения для доступа

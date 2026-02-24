@@ -12,7 +12,11 @@ pub async fn stream_hls(
     State(storage): State<SharedStorage>,
     Path(object_key): Path<String>,
 ) -> impl IntoResponse {
-    tracing::info!("[stream] request: bucket={}, key={}", HLS_BUCKET, object_key);
+    tracing::info!(
+        "[stream] request: bucket={}, key={}",
+        HLS_BUCKET,
+        object_key
+    );
 
     let data = match storage.get_object(HLS_BUCKET, &object_key).await {
         Ok(bytes) => bytes,
