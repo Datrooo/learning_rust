@@ -108,6 +108,54 @@
             font-size: 12px;
             margin-top: 12px;
         }
+        /* ─── Progress Bar ─────────────────────────────────── */
+        .progress-section {
+            display: none;
+            margin-top: 20px;
+        }
+        .progress-section.visible {
+            display: block;
+        }
+        .progress-bar-container {
+            background: #2a2a3e;
+            border-radius: 8px;
+            overflow: hidden;
+            height: 28px;
+            position: relative;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #6c5ce7, #a29bfe);
+            border-radius: 8px;
+            transition: width 0.4s ease;
+            width: 0%;
+        }
+        .progress-bar.error {
+            background: linear-gradient(90deg, #ff4757, #ff6b81);
+        }
+        .progress-bar.done {
+            background: linear-gradient(90deg, #00b894, #55efc4);
+        }
+        .progress-text {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: #fff;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+        }
+        .progress-stage {
+            margin-top: 8px;
+            font-size: 13px;
+            color: #aaa;
+            text-align: center;
+        }
         .player-section {
             margin-top: 20px;
             display: none;
@@ -155,6 +203,14 @@
 
         <div class="spinner" id="spinner">⏳ Проверяем файл...</div>
 
+        <div class="progress-section" id="progressSection">
+            <div class="progress-bar-container">
+                <div class="progress-bar" id="progressBar"></div>
+                <div class="progress-text" id="progressText"></div>
+            </div>
+            <div class="progress-stage" id="progressStage"></div>
+        </div>
+
         <div class="result" id="result"></div>
 
         <div class="player-section" id="playerSection">
@@ -174,6 +230,10 @@
         const playerSection = document.getElementById('playerSection');
         const hlsAudio = document.getElementById('hlsAudio');
         const hlsPathDisplay = document.getElementById('hlsPathDisplay');
+        const progressSection = document.getElementById('progressSection');
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+        const progressStage = document.getElementById('progressStage');
 
         let selectedFile = null;
         let hlsInstance = null;
@@ -182,6 +242,54 @@
         const BACKEND_URL = window.location.hostname === 'localhost'
             ? 'http://localhost:8080'
             : `http://${window.location.hostname}:8080`;
+
+        // ─── Stage labels ───────────────────────────────────────
+        const STAGE_LABELS = {
+            receiving:  '📥 Приём файла…',
+            validating: '🔍 Валидация…',
+            converting: '🔄 Конвертация в HLS…',
+            uploading:  '☁️ Загрузка в хранилище…',
+            done:       '✅ Готово!',
+            error:      '❌ Ошибка',
+        };
+
+        const STAGE_PERCENT = {
+            receiving:  20,
+            validating: 45,
+            converting: 70,
+            uploading:  90,
+            done:       100,
+            error:      100,
+        };
+
+        // ─── UUID v4 generator (no deps) ────────────────────────
+        function uuidv4() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+                const r = Math.random() * 16 | 0;
+                return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+            });
+        }
+
+        // ─── Progress helpers ───────────────────────────────────
+        function showProgress(stage) {
+            progressSection.classList.add('visible');
+            const pct = STAGE_PERCENT[stage] || 0;
+            const label = STAGE_LABELS[stage] || stage;
+            progressBar.style.width = pct + '%';
+            progressBar.className = 'progress-bar' +
+                (stage === 'done' ? ' done' : '') +
+                (stage === 'error' ? ' error' : '');
+            progressText.textContent = pct + '%';
+            progressStage.textContent = label;
+        }
+
+        function hideProgress() {
+            progressSection.classList.remove('visible');
+            progressBar.style.width = '0%';
+            progressBar.className = 'progress-bar';
+            progressText.textContent = '';
+            progressStage.textContent = '';
+        }
 
         dropZone.addEventListener('click', () => fileInput.click());
 
@@ -214,6 +322,7 @@
             uploadBtn.disabled = false;
             resultDiv.className = 'result';
             resultDiv.style.display = 'none';
+            hideProgress();
         }
 
         function formatSize(bytes) {
@@ -234,7 +343,31 @@
             uploadBtn.disabled = true;
             spinner.style.display = 'block';
             resultDiv.style.display = 'none';
+            hideProgress();
 
+            const uploadId = uuidv4();
+
+            // 1. Открываем SSE до начала загрузки
+            let evtSource = null;
+            try {
+                evtSource = new EventSource(`${BACKEND_URL}/api/media/progress/${uploadId}`);
+                evtSource.onmessage = (e) => {
+                    try {
+                        const p = JSON.parse(e.data);
+                        spinner.style.display = 'none'; // убираем спиннер как только пришёл первый event
+                        showProgress(p.stage);
+                    } catch (_) { /* ignore parse errors on keep-alive */ }
+                };
+                evtSource.addEventListener('error', (e) => {
+                    // SSE stream closed or error event from server
+                    if (evtSource) evtSource.close();
+                });
+            } catch (_) {
+                // If SSE fails, upload still works — just no live progress
+                console.warn('SSE connection failed, proceeding without progress');
+            }
+
+            // 2. Отправляем файл с X-Upload-Id
             const formData = new FormData();
             formData.append('audio', selectedFile);
 
@@ -242,11 +375,16 @@
                 const response = await fetch(`${BACKEND_URL}/api/media/upload`, {
                     method: 'POST',
                     body: formData,
+                    headers: { 'X-Upload-Id': uploadId },
                 });
 
                 const data = await response.json();
 
+                // Закрываем SSE
+                if (evtSource) evtSource.close();
+
                 if (data.success) {
+                    showProgress('done');
                     resultDiv.className = 'result success';
                     resultDiv.style.display = 'block';
                     resultDiv.innerHTML = `
@@ -267,19 +405,21 @@
                         <span class="detail">${formatSize(data.size_bytes)}</span>
                     `;
 
-                    // ─── HLS Player ─────────────────────────────────────
                     if (data.hls_path) {
                         initHlsPlayer(data.hls_path);
                     } else {
                         playerSection.classList.remove('visible');
                     }
                 } else {
+                    showProgress('error');
                     resultDiv.className = 'result error';
                     resultDiv.style.display = 'block';
                     resultDiv.innerHTML = `<strong>❌ Ошибка валидации</strong><br><br>${data.error}`;
                     playerSection.classList.remove('visible');
                 }
             } catch (err) {
+                if (evtSource) evtSource.close();
+                showProgress('error');
                 resultDiv.className = 'result error';
                 resultDiv.style.display = 'block';
                 resultDiv.innerHTML = `<strong>❌ Ошибка сети</strong><br><br>${err.message}`;

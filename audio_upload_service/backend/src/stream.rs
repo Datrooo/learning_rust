@@ -4,12 +4,12 @@ use axum::{
     response::IntoResponse,
 };
 
-use crate::upload::SharedStorage;
+use crate::upload::AppState;
 
 const HLS_BUCKET: &str = "audio-hls";
 
 pub async fn stream_hls(
-    State(storage): State<SharedStorage>,
+    State(state): State<AppState>,
     Path(object_key): Path<String>,
 ) -> impl IntoResponse {
     tracing::info!(
@@ -18,7 +18,7 @@ pub async fn stream_hls(
         object_key
     );
 
-    let data = match storage.get_object(HLS_BUCKET, &object_key).await {
+    let data = match state.storage.get_object(HLS_BUCKET, &object_key).await {
         Ok(bytes) => bytes,
         Err(e) => {
             tracing::warn!("[stream] object not found: {}", e);

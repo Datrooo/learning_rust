@@ -1,5 +1,6 @@
 mod hls;
 mod loader_rustfs;
+mod progress;
 mod storage;
 mod stream;
 mod upload;
@@ -12,11 +13,9 @@ use axum::{
 };
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
-use tracing::{info, warn};
-use utoipa::OpenApi;
-use utoipa_swagger_ui::SwaggerUi;
+use tracing::info;
 
-struct ApiDoc;
+use upload::AppState;
 
 #[tokio::main]
 async fn main() {
@@ -27,7 +26,11 @@ async fn main() {
     let client = loader_rustfs::create_client(&cfg)
         .await
         .expect("Failed to create RustFS client");
-    let storage = Arc::new(client);
+
+    let state = AppState {
+        storage: Arc::new(client),
+        progress: progress::new_progress_map(),
+    };
 
     // в будущем сделать ограничения для доступа
     let cors = CorsLayer::new()
@@ -38,10 +41,11 @@ async fn main() {
     let app = Router::new()
         //.merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .route("/api/media/upload", post(upload::upload_audio))
+        .route("/api/media/progress/:upload_id", get(progress::progress_sse))
         .route("/hls/*path", get(stream::stream_hls))
         .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
         .layer(cors)
-        .with_state(storage);
+        .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080")
         .await

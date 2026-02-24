@@ -4,22 +4,6 @@ use std::path::Path;
 
 use crate::hls::HlsOutput;
 
-
-pub struct UploadProgress {
-    pub bytes_received: usize,
-    pub total_expected: Option<usize>,  // из Content-Length
-    pub stage: Stage,                    // Receiving, Validating, Converting, Uploading, Done, Error
-}
-
-pub enum Stage {
-    Receiving,
-    Validating,
-    Converting,
-    Uploading,
-    Done,
-    Error,
-}
-
 #[async_trait]
 pub trait StorageBackend: Send + Sync {
     fn name(&self) -> &str;

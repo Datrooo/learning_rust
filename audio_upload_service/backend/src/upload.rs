@@ -11,6 +11,7 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 use uuid::Uuid;
 
 use crate::hls;
+use crate::progress::{ProgressMap, Stage, UploadProgress};
 use crate::storage::StorageBackend;
 use crate::validation;
 use tracing::info;
@@ -18,6 +19,12 @@ use tracing::info;
 const MAX_FILE_SIZE: usize = 50 * 1024 * 1024;
 
 const HLS_BUCKET: &str = "audio-hls";
+
+#[derive(Clone)]
+pub struct AppState {
+    pub storage: Arc<dyn StorageBackend>,
+    pub progress: ProgressMap,
+}
 
 #[derive(Serialize)]
 pub struct UploadResponse {
@@ -43,6 +50,8 @@ pub struct UploadResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hls_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub upload_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
@@ -62,17 +71,26 @@ fn error_response(status: StatusCode, error: String) -> (StatusCode, Json<Upload
             bit_rate: None,
             size_bytes: None,
             hls_path: None,
+            upload_id: None,
             error: Some(error),
         }),
     )
 }
 
-pub type SharedStorage = Arc<dyn StorageBackend>;
-
 pub async fn upload_audio(
-    State(storage): State<SharedStorage>,
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     mut multipart: Multipart,
 ) -> (StatusCode, Json<UploadResponse>) {
+    let storage = &state.storage;
+    let progress_map = &state.progress;
+
+    let upload_id = headers
+        .get("x-upload-id")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| Uuid::parse_str(s).ok())
+        .unwrap_or_else(Uuid::new_v4);
+
     let mut field = match multipart.next_field().await {
         Ok(Some(field)) => field,
         Ok(None) => {
@@ -87,6 +105,8 @@ pub async fn upload_audio(
     };
 
     let filename = field.file_name().unwrap_or("unknown").to_string();
+
+    let content_length: Option<usize> = None;
 
     let extension = match validation::validate_extension(&filename) {
         Ok(ext) => ext,
@@ -123,13 +143,21 @@ pub async fn upload_audio(
     let mut magic_checked = false;
     let mut head_buf = Vec::new();
 
-    info!("Start receiving file '{}' (ext={})", filename, extension);
+    progress_map.insert(upload_id, UploadProgress {
+        stage: Stage::Receiving,
+        bytes_received: 0,
+        total_expected: content_length,
+        message: Some(format!("upload_id:{}", upload_id)),
+    });
+
+    info!("Start receiving file '{}' (ext={}, upload_id={})", filename, extension, upload_id);
 
     loop {
         let chunk = match field.chunk().await {
             Ok(Some(c)) => c,
             Ok(None) => break,
             Err(e) => {
+                set_error(progress_map, upload_id, &e.to_string());
                 return error_response(
                     StatusCode::BAD_REQUEST,
                     format!("Ошибка чтения данных файла: {}", e),
@@ -139,15 +167,21 @@ pub async fn upload_audio(
 
         total_bytes += chunk.len();
 
+        progress_map.insert(upload_id, UploadProgress {
+            stage: Stage::Receiving,
+            bytes_received: total_bytes,
+            total_expected: content_length,
+            message: None,
+        });
+
         if total_bytes > MAX_FILE_SIZE {
-            return error_response(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                format!(
-                    "Файл слишком большой: {} MB (максимум: {} MB)",
-                    total_bytes / (1024 * 1024),
-                    MAX_FILE_SIZE / (1024 * 1024)
-                ),
+            let msg = format!(
+                "Файл слишком большой: {} MB (максимум: {} MB)",
+                total_bytes / (1024 * 1024),
+                MAX_FILE_SIZE / (1024 * 1024)
             );
+            set_error(progress_map, upload_id, &msg);
+            return error_response(StatusCode::PAYLOAD_TOO_LARGE, msg);
         }
 
         if !magic_checked {
@@ -156,6 +190,7 @@ pub async fn upload_audio(
                 let detected_format = match validation::validate_magic_bytes(&head_buf) {
                     Ok(fmt) => fmt,
                     Err(e) => {
+                        set_error(progress_map, upload_id, &e);
                         return error_response(StatusCode::UNSUPPORTED_MEDIA_TYPE, e);
                     }
                 };
@@ -163,6 +198,7 @@ pub async fn upload_audio(
                     &extension,
                     detected_format,
                 ) {
+                    set_error(progress_map, upload_id, &e);
                     return error_response(StatusCode::BAD_REQUEST, e);
                 }
                 info!(
@@ -175,29 +211,27 @@ pub async fn upload_audio(
         }
 
         if let Err(e) = writer.write_all(&chunk).await {
-            return error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Ошибка записи во временный файл: {}", e),
-            );
+            let msg = format!("Ошибка записи во временный файл: {}", e);
+            set_error(progress_map, upload_id, &msg);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, msg);
         }
     }
 
     if let Err(e) = writer.flush().await {
-        return error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Ошибка сброса буфера во временный файл: {}", e),
-        );
+        let msg = format!("Ошибка сброса буфера во временный файл: {}", e);
+        set_error(progress_map, upload_id, &msg);
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, msg);
     }
 
     if total_bytes == 0 {
+        set_error(progress_map, upload_id, "Файл пустой");
         return error_response(StatusCode::BAD_REQUEST, "Файл пустой".into());
     }
 
     if !magic_checked {
-        return error_response(
-            StatusCode::BAD_REQUEST,
-            "Файл слишком мал для определения формата".into(),
-        );
+        let msg = "Файл слишком мал для определения формата";
+        set_error(progress_map, upload_id, msg);
+        return error_response(StatusCode::BAD_REQUEST, msg.into());
     }
 
     info!(
@@ -209,28 +243,51 @@ pub async fn upload_audio(
 
     let tmp_pathbuf = tmp_path.to_path_buf();
 
+    set_stage(progress_map, upload_id, Stage::Validating, total_bytes, content_length);
+
     let validation_result = match run_ffprobe_validation(&tmp_pathbuf).await {
         Ok(v) => v,
-        Err(resp) => return resp,
+        Err(resp) => {
+            set_error(progress_map, upload_id, "ffprobe validation failed");
+            return resp;
+        }
     };
 
     if let Err(resp) = run_decode_check(&tmp_pathbuf, &filename).await {
+        set_error(progress_map, upload_id, "decode check failed");
         return resp;
     }
 
+    set_stage(progress_map, upload_id, Stage::Converting, total_bytes, content_length);
+
     let hls_output = match run_hls_conversion(&tmp_pathbuf).await {
         Ok(h) => h,
-        Err(resp) => return resp,
+        Err(resp) => {
+            set_error(progress_map, upload_id, "HLS conversion failed");
+            return resp;
+        }
     };
 
-    let upload_result = upload_hls_to_storage(&storage, &hls_output, &filename).await;
+    set_stage(progress_map, upload_id, Stage::Uploading, total_bytes, content_length);
+
+    let upload_result = upload_hls_to_storage(storage, &hls_output, &filename).await;
 
     hls_output.cleanup().await;
 
     let (hls_path, _) = match upload_result {
         Ok(v) => v,
-        Err(resp) => return resp,
+        Err(resp) => {
+            set_error(progress_map, upload_id, "S3 upload failed");
+            return resp;
+        }
     };
+
+    progress_map.insert(upload_id, UploadProgress {
+        stage: Stage::Done,
+        bytes_received: total_bytes,
+        total_expected: content_length,
+        message: Some("Загрузка завершена".into()),
+    });
 
     (
         StatusCode::OK,
@@ -248,9 +305,34 @@ pub async fn upload_audio(
             bit_rate: validation_result.bit_rate,
             size_bytes: Some(total_bytes),
             hls_path: Some(hls_path),
+            upload_id: Some(upload_id.to_string()),
             error: None,
         }),
     )
+}
+
+fn set_stage(
+    map: &ProgressMap,
+    id: Uuid,
+    stage: Stage,
+    bytes: usize,
+    total: Option<usize>,
+) {
+    map.insert(id, UploadProgress {
+        stage,
+        bytes_received: bytes,
+        total_expected: total,
+        message: None,
+    });
+}
+
+fn set_error(map: &ProgressMap, id: Uuid, msg: &str) {
+    map.insert(id, UploadProgress {
+        stage: Stage::Error,
+        bytes_received: 0,
+        total_expected: None,
+        message: Some(msg.to_string()),
+    });
 }
 
 type ErrorResponse = (StatusCode, Json<UploadResponse>);
@@ -330,7 +412,7 @@ async fn run_hls_conversion(tmp_path: &PathBuf) -> Result<hls::HlsOutput, ErrorR
 }
 
 async fn upload_hls_to_storage(
-    storage: &SharedStorage,
+    storage: &Arc<dyn StorageBackend>,
     hls_output: &hls::HlsOutput,
     filename: &str,
 ) -> Result<(String, String), ErrorResponse> {
