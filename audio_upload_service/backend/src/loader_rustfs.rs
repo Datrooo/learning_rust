@@ -109,10 +109,11 @@ impl RustFsClient {
         Ok(())
     }
 
+    // надо как-то не писать фул опять , как-то через стримы обойти
     pub async fn upload_file(
         &self,
         filepath: &Path,
-        filename: &str,
+        object_key: &str,
         bucket_name: &str,
     ) -> Result<()> {
         info!("started to upload file");
@@ -129,20 +130,19 @@ impl RustFsClient {
         self.client
             .put_object()
             .bucket(bucket_name)
-            .key(filename)
+            .key(object_key)
             .body(ByteStream::from(data))
             .send()
             .await
-            .with_context(|| format!("error uploading '{filename}' to bucket '{bucket_name}'"))?;
+            .with_context(|| format!("error uploading '{object_key}' to bucket '{bucket_name}'"))?;
 
         info!(
             "uploaded successfully: bucket='{}', object='{}', bytes={}",
-            bucket_name, filename, size_bytes
+            bucket_name, object_key, size_bytes
         );
         Ok(())
     }
 
-    /// Скачивает объект из бакета и возвращает сырые байты
     pub async fn get_bytes(&self, bucket_name: &str, object_key: &str) -> Result<Vec<u8>> {
         let res = self
             .client
@@ -238,15 +238,15 @@ impl StorageBackend for RustFsClient {
     }
 
     async fn ensure_bucket(&self, bucket: &str) -> Result<()> {
-        self.new_bucket(bucket).await
+        RustFsClient::new_bucket(self, bucket).await
     }
 
-    async fn upload_file(&self, local_path: &Path, bucket: &str, object_key: &str) -> Result<()> {
-        RustFsClient::upload_file(self, local_path, object_key, bucket).await
+    async fn upload_file(&self, local_path: &Path, bucket_name: &str, object_key: &str) -> Result<()> {
+        RustFsClient::upload_file(self, local_path, object_key, bucket_name).await
     }
 
     async fn get_object(&self, bucket: &str, object_key: &str) -> Result<Vec<u8>> {
-        self.get_bytes(bucket, object_key).await
+        RustFsClient::get_bytes(self, bucket, object_key).await
     }
 
     async fn delete_object(&self, bucket: &str, object_key: &str) -> Result<()> {

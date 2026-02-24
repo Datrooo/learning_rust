@@ -10,7 +10,7 @@ pub trait StorageBackend: Send + Sync {
 
     async fn ensure_bucket(&self, bucket: &str) -> Result<()>;
 
-    async fn upload_file(&self, local_path: &Path, bucket: &str, object_key: &str) -> Result<()>;
+    async fn upload_file(&self, local_path: &Path, bucket_name: &str, object_key: &str) -> Result<()>;
 
     async fn get_object(&self, bucket: &str, object_key: &str) -> Result<Vec<u8>>;
 

@@ -7,6 +7,8 @@ mod stream;
 mod upload;
 mod validation;
 
+// добавить кафку
+
 use axum::{
     extract::DefaultBodyLimit,
     routing::{get, post},

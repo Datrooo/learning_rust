@@ -13,6 +13,9 @@ use utoipa::ToSchema;
 
 use crate::upload::AppState;
 
+/*
+Один progress_map.remove() на cleanup: если два SSE-клиента подключатся к одному upload_id, первый закончивший удалит запись, второй получит None и закроется. Не критично для текущего use-case, но стоит знать. */
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Stage {
@@ -33,16 +36,6 @@ pub struct UploadProgress {
     pub message: Option<String>,
 }
 
-impl UploadProgress {
-    pub fn new() -> Self {
-        Self {
-            stage: Stage::Receiving,
-            bytes_received: 0,
-            total_expected: None,
-            message: None,
-        }
-    }
-}
 
 pub type ProgressMap = Arc<DashMap<Uuid, UploadProgress>>;
 

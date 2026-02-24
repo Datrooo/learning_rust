@@ -46,6 +46,7 @@ pub fn convert_to_hls(input_path: &Path) -> Result<HlsOutput, String> {
     std::fs::create_dir_all(&hls_dir)
         .map_err(|e| format!("Не удалось создать HLS директорию: {}", e))?;
 
+    // в будущем писать уникальные мб
     let playlist_path = hls_dir.join("playlist.m3u8");
     let segment_pattern = hls_dir.join("seg_%05d.m4s");
 
@@ -72,9 +73,9 @@ pub fn convert_to_hls(input_path: &Path) -> Result<HlsOutput, String> {
             "-hls_segment_type",
             "fmp4",
             "-hls_segment_filename",
-            segment_pattern.to_str().unwrap_or(""),
+            segment_pattern.to_str().ok_or_else(|| "non utf 8 path")?,
         ])
-        .arg(playlist_path.to_str().unwrap_or(""))
+        .arg(playlist_path.to_str().ok_or_else(|| "non utf 8 path")?)
         .output()
         .map_err(|e| format!("Не удалось запустить ffmpeg для HLS: {}", e))?;
 
@@ -98,6 +99,7 @@ pub fn convert_to_hls(input_path: &Path) -> Result<HlsOutput, String> {
 
     Ok(HlsOutput {
         output_dir: hls_dir,
+        // и тут
         playlist_name: "playlist.m3u8".to_string(),
     })
 }

@@ -8,6 +8,8 @@ use crate::upload::AppState;
 
 const HLS_BUCKET: &str = "audio-hls";
 
+// мб добавить кэширование, если это вообще возможно...
+
 pub async fn stream_hls(
     State(state): State<AppState>,
     Path(object_key): Path<String>,
