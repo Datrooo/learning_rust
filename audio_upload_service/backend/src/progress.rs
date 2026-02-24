@@ -9,10 +9,11 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
+use utoipa::ToSchema;
 
 use crate::upload::AppState;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Stage {
     Receiving,
@@ -23,7 +24,7 @@ pub enum Stage {
     Error,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct UploadProgress {
     pub stage: Stage,
     pub bytes_received: usize,
@@ -51,6 +52,17 @@ pub fn new_progress_map() -> ProgressMap {
 
 type SseStream = Pin<Box<dyn futures_core::Stream<Item = Result<Event, Infallible>> + Send>>;
 
+#[utoipa::path(
+    get,
+    path = "/api/media/progress/{upload_id}",
+    params(
+        ("upload_id" = Uuid, Path, description = "Upload id")
+    ),
+    responses(
+        (status = 200, description = "SSE progress stream", content_type = "text/event-stream", body = UploadProgress)
+    ),
+    tag = "media"
+)]
 pub async fn progress_sse(
     State(state): State<AppState>,
     Path(upload_id): Path<Uuid>,

@@ -1,3 +1,4 @@
+mod api_doc;
 mod hls;
 mod loader_rustfs;
 mod progress;
@@ -14,7 +15,10 @@ use axum::{
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::info;
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
+use api_doc::ApiDoc;
 use upload::AppState;
 
 #[tokio::main]
@@ -39,7 +43,7 @@ async fn main() {
         .allow_headers(Any);
 
     let app = Router::new()
-        //.merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
+        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .route("/api/media/upload", post(upload::upload_audio))
         .route("/api/media/progress/:upload_id", get(progress::progress_sse))
         .route("/hls/*path", get(stream::stream_hls))
@@ -51,6 +55,8 @@ async fn main() {
         .await
         .expect("Failed to bind to port 8080");
 
-    tracing::info!("Backend listening on 0.0.0.0:8080");
+    tracing::info!("Backend listening on http://0.0.0.0:8080");
+    tracing::info!("Swagger UI: http://localhost:8080/swagger-ui/");
+    tracing::info!("OpenAPI JSON: http://localhost:8080/api-docs/openapi.json");
     axum::serve(listener, app).await.expect("Server error");
 }

@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tempfile::NamedTempFile;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use uuid::Uuid;
+use utoipa::ToSchema;
 
 use crate::hls;
 use crate::progress::{ProgressMap, Stage, UploadProgress};
@@ -26,7 +27,7 @@ pub struct AppState {
     pub progress: ProgressMap,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct UploadResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -55,6 +56,12 @@ pub struct UploadResponse {
     pub error: Option<String>,
 }
 
+#[derive(ToSchema)]
+pub struct UploadRequest {
+    #[schema(format = "binary")]
+    pub audio: String,
+}
+
 fn error_response(status: StatusCode, error: String) -> (StatusCode, Json<UploadResponse>) {
     tracing::warn!("Validation failed: {}", error);
     (
@@ -77,6 +84,21 @@ fn error_response(status: StatusCode, error: String) -> (StatusCode, Json<Upload
     )
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/media/upload",
+    request_body(
+        content = UploadRequest,
+        content_type = "multipart/form-data",
+        description = "Multipart form with audio file"
+    ),
+    responses(
+        (status = 200, description = "Upload ok", body = UploadResponse),
+        (status = 400, description = "Validation error", body = UploadResponse),
+        (status = 415, description = "Unsupported media type", body = UploadResponse)
+    ),
+    tag = "media"
+)]
 pub async fn upload_audio(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
