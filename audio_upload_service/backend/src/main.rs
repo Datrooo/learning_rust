@@ -1,5 +1,6 @@
 mod api_doc;
 mod hls;
+mod kafka;
 mod loader_rustfs;
 mod progress;
 mod storage;
@@ -7,21 +8,17 @@ mod stream;
 mod upload;
 mod validation;
 
-// добавить кафку
-
 use axum::{
     extract::DefaultBodyLimit,
     routing::{get, post},
     Router,
 };
-use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::info;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use api_doc::ApiDoc;
-use upload::AppState;
 
 #[tokio::main]
 async fn main() {
@@ -33,10 +30,23 @@ async fn main() {
         .await
         .expect("Failed to create RustFS client");
 
-    let state = AppState {
-        storage: Arc::new(client),
+    let kafka_brokers = std::env::var("KAFKA_BROKERS").unwrap_or_else(|_| "localhost:9092".to_string());
+    let kafka_producer = kafka::new_producer(&kafka_brokers)
+        .expect("Failed to create Kafka producer");
+
+    let state = upload::AppState {
+        storage: std::sync::Arc::new(client),
         progress: progress::new_progress_map(),
+        kafka: kafka_producer,
     };
+
+    let consumer_storage = state.storage.clone();
+    let consumer_brokers = kafka_brokers.clone();
+    tokio::spawn(async move {
+        if let Err(e) = kafka::run_podcast_consumer(&consumer_brokers, consumer_storage).await {
+            tracing::error!("Kafka consumer crashed: {}", e);
+        }
+    });
 
     // в будущем сделать ограничения для доступа
     let cors = CorsLayer::new()

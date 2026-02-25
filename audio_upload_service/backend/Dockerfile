@@ -1,6 +1,9 @@
 # -- Build stage --
 FROM rust:latest AS builder
 WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends cmake pkg-config build-essential \
+    && rm -rf /var/lib/apt/lists/*
 COPY Cargo.toml Cargo.lock* ./
 # Создаём пустой src для кеширования зависимостей
 RUN mkdir src && echo "fn main() {}" > src/main.rs

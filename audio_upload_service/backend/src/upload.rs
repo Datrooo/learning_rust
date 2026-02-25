@@ -12,6 +12,7 @@ use uuid::Uuid;
 use utoipa::ToSchema;
 
 use crate::hls;
+use crate::kafka::SharedKafkaProducer;
 use crate::progress::{ProgressMap, Stage, UploadProgress};
 use crate::storage::StorageBackend;
 use crate::validation;
@@ -25,6 +26,7 @@ const HLS_BUCKET: &str = "audio-hls";
 pub struct AppState {
     pub storage: Arc<dyn StorageBackend>,
     pub progress: ProgressMap,
+    pub kafka: SharedKafkaProducer,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -106,6 +108,7 @@ pub async fn upload_audio(
 ) -> (StatusCode, Json<UploadResponse>) {
     let storage = &state.storage;
     let progress_map = &state.progress;
+    let kafka = &state.kafka;
 
     let upload_id = headers
         .get("x-upload-id")
@@ -174,12 +177,16 @@ pub async fn upload_audio(
 
     info!("Start receiving file '{}' (ext={}, upload_id={})", filename, extension, upload_id);
 
+    if let Err(e) = kafka.send_start_upload(upload_id, &filename).await {
+        tracing::warn!("Failed to publish media.start_upload event: {}", e);
+    }
+
     loop {
         let chunk = match field.chunk().await {
             Ok(Some(c)) => c,
             Ok(None) => break,
             Err(e) => {
-                set_error(progress_map, upload_id, &e.to_string());
+                set_error(progress_map, upload_id, &e.to_string(), kafka);
                 return error_response(
                     StatusCode::BAD_REQUEST,
                     format!("Ошибка чтения данных файла: {}", e),
@@ -202,7 +209,7 @@ pub async fn upload_audio(
                 total_bytes / (1024 * 1024),
                 MAX_FILE_SIZE / (1024 * 1024)
             );
-            set_error(progress_map, upload_id, &msg);
+            set_error(progress_map, upload_id, &msg, kafka);
             return error_response(StatusCode::PAYLOAD_TOO_LARGE, msg);
         }
 
@@ -212,7 +219,7 @@ pub async fn upload_audio(
                 let detected_format = match validation::validate_magic_bytes(&head_buf) {
                     Ok(fmt) => fmt,
                     Err(e) => {
-                        set_error(progress_map, upload_id, &e);
+                        set_error(progress_map, upload_id, &e, kafka);
                         return error_response(StatusCode::UNSUPPORTED_MEDIA_TYPE, e);
                     }
                 };
@@ -220,7 +227,7 @@ pub async fn upload_audio(
                     &extension,
                     detected_format,
                 ) {
-                    set_error(progress_map, upload_id, &e);
+                    set_error(progress_map, upload_id, &e, kafka);
                     return error_response(StatusCode::BAD_REQUEST, e);
                 }
                 info!(
@@ -234,25 +241,25 @@ pub async fn upload_audio(
 
         if let Err(e) = writer.write_all(&chunk).await {
             let msg = format!("Ошибка записи во временный файл: {}", e);
-            set_error(progress_map, upload_id, &msg);
+            set_error(progress_map, upload_id, &msg, kafka);
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, msg);
         }
     }
 
     if let Err(e) = writer.flush().await {
         let msg = format!("Ошибка сброса буфера во временный файл: {}", e);
-        set_error(progress_map, upload_id, &msg);
+        set_error(progress_map, upload_id, &msg, kafka);
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, msg);
     }
 
     if total_bytes == 0 {
-        set_error(progress_map, upload_id, "Файл пустой");
+        set_error(progress_map, upload_id, "Файл пустой", kafka);
         return error_response(StatusCode::BAD_REQUEST, "Файл пустой".into());
     }
 
     if !magic_checked {
         let msg = "Файл слишком мал для определения формата";
-        set_error(progress_map, upload_id, msg);
+        set_error(progress_map, upload_id, msg, kafka);
         return error_response(StatusCode::BAD_REQUEST, msg.into());
     }
 
@@ -270,13 +277,13 @@ pub async fn upload_audio(
     let validation_result = match run_ffprobe_validation(&tmp_pathbuf).await {
         Ok(v) => v,
         Err(resp) => {
-            set_error(progress_map, upload_id, "ffprobe validation failed");
+            set_error(progress_map, upload_id, "ffprobe validation failed", kafka);
             return resp;
         }
     };
 
     if let Err(resp) = run_decode_check(&tmp_pathbuf, &filename).await {
-        set_error(progress_map, upload_id, "decode check failed");
+        set_error(progress_map, upload_id, "decode check failed", kafka);
         return resp;
     }
 
@@ -285,7 +292,7 @@ pub async fn upload_audio(
     let hls_output = match run_hls_conversion(&tmp_pathbuf).await {
         Ok(h) => h,
         Err(resp) => {
-            set_error(progress_map, upload_id, "HLS conversion failed");
+            set_error(progress_map, upload_id, "HLS conversion failed", kafka);
             return resp;
         }
     };
@@ -299,7 +306,7 @@ pub async fn upload_audio(
     let (hls_path, _) = match upload_result {
         Ok(v) => v,
         Err(resp) => {
-            set_error(progress_map, upload_id, "S3 upload failed");
+            set_error(progress_map, upload_id, "S3 upload failed", kafka);
             return resp;
         }
     };
@@ -310,6 +317,21 @@ pub async fn upload_audio(
         total_expected: content_length,
         message: Some("Загрузка завершена".into()),
     });
+
+    if let Err(e) = kafka.send_uploaded(
+        upload_id,
+        &filename,
+        validation_result.format_name.clone(),
+        validation_result.codec.clone(),
+        validation_result.sample_rate,
+        validation_result.channels,
+        validation_result.duration_secs,
+        validation_result.bit_rate,
+        total_bytes,
+        &hls_path,
+    ).await {
+        tracing::warn!("Failed to publish media.uploaded event: {}", e);
+    }
 
     (
         StatusCode::OK,
@@ -348,12 +370,20 @@ fn set_stage(
     });
 }
 
-fn set_error(map: &ProgressMap, id: Uuid, msg: &str) {
+fn set_error(map: &ProgressMap, id: Uuid, msg: &str, kafka: &SharedKafkaProducer) {
     map.insert(id, UploadProgress {
         stage: Stage::Error,
         bytes_received: 0,
         total_expected: None,
         message: Some(msg.to_string()),
+    });
+    
+    let kafka = kafka.clone();
+    let msg = msg.to_string();
+    tokio::spawn(async move {
+        if let Err(e) = kafka.send_error(id, &msg).await {
+            tracing::warn!("Failed to publish media.error event: {}", e);
+        }
     });
 }
 

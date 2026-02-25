@@ -1,4 +1,19 @@
 services:
+  kafka:
+    image: apache/kafka:latest
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    volumes:
+      - ./kafka/server.properties:/mnt/shared/config/server.properties
+    environment:
+      KAFKA_CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server=localhost:9092 > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   rustfs:
     image: rustfs/rustfs:latest
     ports:
@@ -29,8 +44,11 @@ services:
       - RUSTFS_ACCESS_KEY_ID=rustfsadmin
       - RUSTFS_SECRET_ACCESS_KEY=rustfsadmin
       - RUSTFS_ENDPOINT_URL=http://rustfs:9000
+      - KAFKA_BROKERS=kafka:9092
     depends_on:
       rustfs:
+        condition: service_healthy
+      kafka:
         condition: service_healthy
 
   frontend-rustfs:
