@@ -31,6 +31,9 @@ async fn main() {
         .expect("Failed to create RustFS client");
 
     let kafka_brokers = std::env::var("KAFKA_BROKERS").unwrap_or_else(|_| "localhost:9092".to_string());
+    kafka::ensure_topics(&kafka_brokers)
+        .await
+        .expect("Failed to ensure Kafka topics");
     let kafka_producer = kafka::new_producer(&kafka_brokers)
         .expect("Failed to create Kafka producer");
 
@@ -59,7 +62,7 @@ async fn main() {
         .route("/api/media/upload", post(upload::upload_audio))
         .route("/api/media/progress/:upload_id", get(progress::progress_sse))
         .route("/hls/*path", get(stream::stream_hls))
-        .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
+        .layer(DefaultBodyLimit::max(200 * 1024 * 1024))
         .layer(cors)
         .with_state(state);
 

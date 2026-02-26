@@ -238,10 +238,9 @@
         let selectedFile = null;
         let hlsInstance = null;
 
-        // Определяем URL бэкенда
-        const BACKEND_URL = window.location.hostname === 'localhost'
-            ? 'http://localhost:8080'
-            : `http://${window.location.hostname}:8080`;
+        // Используем same-origin: nginx проксирует /api и /hls в backend.
+        const API_BASE = '/api';
+        const HLS_BASE = '/hls';
 
         // ─── Stage labels ───────────────────────────────────────
         const STAGE_LABELS = {
@@ -350,7 +349,8 @@
             // 1. Открываем SSE до начала загрузки
             let evtSource = null;
             try {
-                evtSource = new EventSource(`${BACKEND_URL}/api/media/progress/${uploadId}`);
+                const progressUrl = `${API_BASE}/media/progress/${encodeURIComponent(uploadId)}`;
+                evtSource = new EventSource(progressUrl);
                 evtSource.onmessage = (e) => {
                     try {
                         const p = JSON.parse(e.data);
@@ -372,13 +372,25 @@
             formData.append('audio', selectedFile);
 
             try {
-                const response = await fetch(`${BACKEND_URL}/api/media/upload`, {
+                const uploadUrl = `${API_BASE}/media/upload`;
+                const response = await fetch(uploadUrl, {
                     method: 'POST',
                     body: formData,
                     headers: { 'X-Upload-Id': uploadId },
                 });
 
-                const data = await response.json();
+                const rawBody = await response.text();
+                let data = {};
+                try {
+                    data = rawBody ? JSON.parse(rawBody) : {};
+                } catch (_) {
+                    throw new Error(`Сервер вернул некорректный ответ (HTTP ${response.status})`);
+                }
+
+                if (!response.ok) {
+                    const serverMsg = data.error || data.message || `HTTP ${response.status}`;
+                    throw new Error(serverMsg);
+                }
 
                 // Закрываем SSE
                 if (evtSource) evtSource.close();
@@ -434,7 +446,11 @@
             // hls_path приходит как "audio-hls/stem/uuid/playlist.m3u8"
             // backend route: GET /hls/{*path} — нужно убрать префикс бакета "audio-hls/"
             const objectKey = hlsPath.replace(/^audio-hls\//, '');
-            const streamUrl = `${BACKEND_URL}/hls/${objectKey}`;
+            const encodedObjectKey = objectKey
+                .split('/')
+                .map(encodeURIComponent)
+                .join('/');
+            const streamUrl = `${HLS_BASE}/${encodedObjectKey}`;
 
             hlsPathDisplay.textContent = `📂 ${hlsPath}`;
 
